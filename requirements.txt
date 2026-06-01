@@ -1,0 +1,8 @@
+# Installed by scripts\00_FIRST_RUN_INSTALL_ALL.bat through MSYS2 pacman.
+# Do not copy or pip-install Windows Python binary packages into MSYS2.
+numpy
+PyQt5
+pyqtgraph
+pyserial
+sipyco
+h5py

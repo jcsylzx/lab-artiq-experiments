@@ -1,0 +1,50 @@
+# Runtime/generated data
+dataset_db.mdb
+dataset_db.mdb-lock
+logs/
+_diag_*/
+
+# Packaged distributions and bundled runtimes
+dist/
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.rar
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Local diagnostics
+diagnostics_*.zip
+install_*.log
+*.log
+
+# Obsolete ARTIQ experiments/docs not used by the current continuous TTL bridge
+artiq_repository/edge_counter_dataset_bridge.py
+artiq_repository/ttl_input_probe.py
+artiq_repository/ttl_level_probe.py
+artiq_repository/ttl_signal_monitor.py
+docs/ARTIQ代码工作原理.md
+docs/TTL_THRESHOLD_AND_UNITS.md
+docs/使用说明书.md
+docs/高频PMT计数与EdgeCounter方案.md
+submit_ttl_monitor.bat
+scripts/00_FIRST_RUN_INSTALL_ALL.bat
+scripts/00_use_bundled_runtime.bat
+scripts/06_probe_ttl_input.bat
+scripts/07_fix_gui_deps_msys2.bat
+scripts/08_rebuild_msys_gui_runtime.bat
+scripts/install_all_dependencies.ps1
+scripts/print_site_packages.py
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
