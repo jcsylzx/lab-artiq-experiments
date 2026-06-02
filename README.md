@@ -49,7 +49,7 @@ pip install pyserial PyQt5 pyqtgraph numpy sipyco h5py
 ## 启动
 
 ```bash
-cd "D:\0核钟\任务\artiq+多场\multi_stage_gui"
+cd "multi_stage_gui"
 python main_gui.py
 ```
 
