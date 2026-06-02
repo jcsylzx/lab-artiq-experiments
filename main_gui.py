@@ -9,13 +9,16 @@
 
 import sys
 import time
+import os
+import re
+from datetime import datetime
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QGridLayout, QLabel, QLineEdit,
                              QPushButton, QGroupBox, QComboBox, QCheckBox,
                              QDoubleSpinBox, QSpinBox, QTabWidget, QFrame,
                              QFileDialog)
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QTimer, QSettings
 from PyQt5.QtGui import QPalette, QColor, QFont
 import pyqtgraph as pg
 import pyqtgraph.exporters
@@ -209,6 +212,19 @@ class Plot1D(QWidget):
             self.data[i]['I'].clear()
             self.curves[i].setData([], [])
 
+    def has_data(self):
+        return any(self.data[i]['pos'] for i in range(4))
+
+    def export_csv(self, path):
+        with open(path, 'w', encoding='utf-8-sig') as handle:
+            handle.write('channel,position,intensity_khz\n')
+            for channel in range(4):
+                pos_data = self.data[channel]['pos']
+                intensity_data = self.data[channel]['I']
+                for pos, intensity in zip(pos_data, intensity_data):
+                    handle.write(
+                        f'{channel},{float(pos):.12g},{float(intensity):.12g}\n')
+
 
 class PlotLive(QWidget):
     """实时脉冲强度 vs 时间，用于手动移动时观察信号变化。"""
@@ -266,6 +282,16 @@ class PlotLive(QWidget):
         self.intensity_data.clear()
         self.curve.setData([], [])
         self.latest_label.setText('最新强度: --')
+
+
+    def has_data(self):
+        return bool(self.time_data)
+
+    def export_csv(self, path):
+        with open(path, 'w', encoding='utf-8-sig') as handle:
+            handle.write('time_s,intensity_khz\n')
+            for t, intensity in zip(self.time_data, self.intensity_data):
+                handle.write(f'{float(t):.12g},{float(intensity):.12g}\n')
 
 
 class Plot2D(QWidget):
@@ -614,12 +640,18 @@ class Plot2D(QWidget):
     def clear(self):
         self._init_image()
 
+    def has_data(self):
+        return self.image is not None and np.isfinite(self.image).any()
+
     def export_image(self):
         path, _ = QFileDialog.getSaveFileName(
             self, '导出热图图片', 'heatmap.png',
             'PNG图片 (*.png);;TIFF图片 (*.tif);;所有文件 (*)')
         if not path:
             return
+        self.export_image_to_path(path)
+
+    def export_image_to_path(self, path):
         exporter = pg.exporters.ImageExporter(self.view)
         exporter.export(path)
 
@@ -629,6 +661,9 @@ class Plot2D(QWidget):
             'CSV数据 (*.csv);;NumPy数组 (*.npz);;所有文件 (*)')
         if not path:
             return
+        self.export_data_to_path(path)
+
+    def export_data_to_path(self, path):
         _, _, xmin, xmax, ymin, ymax, nx, ny = self.get_axes()
         x_centers = xmin + (np.arange(nx) + 0.5) * (xmax - xmin) / nx
         y_centers = ymin + (np.arange(ny) + 0.5) * (ymax - ymin) / ny
@@ -669,6 +704,7 @@ class MainWindow(QMainWindow):
         self.data_reader = ARTIQDataReader(mode='sipyco')
         self.data_connected = False
         self.last_intensity = None
+        self.settings = QSettings('lab-artiq-experiments', 'multi-stage-gui')
 
         # 扫描状态
         self.scan_mode = '1D'  # '1D' 或 '2D'
@@ -824,6 +860,34 @@ class MainWindow(QMainWindow):
         ttl_row.addStretch()
         root.addLayout(ttl_row)
 
+        save_row = QHBoxLayout()
+        save_row.addWidget(QLabel('默认保存目录:'))
+        default_root = os.path.join(
+            os.path.expanduser('~'), 'Documents', 'multi_stage_gui_data')
+        self.save_root_input = QLineEdit(
+            self.settings.value('save/root', default_root, type=str))
+        self.save_root_input.setMinimumWidth(360)
+        save_row.addWidget(self.save_root_input, 1)
+
+        self.choose_save_root_btn = QPushButton('选择文件夹')
+        self.choose_save_root_btn.clicked.connect(self.on_choose_save_root)
+        save_row.addWidget(self.choose_save_root_btn)
+
+        save_row.addWidget(QLabel('文件名后缀:'))
+        self.save_tag_input = QLineEdit(
+            self.settings.value('save/tag', 'scan', type=str))
+        self.save_tag_input.setFixedWidth(160)
+        save_row.addWidget(self.save_tag_input)
+
+        self.save_all_btn = QPushButton('一键保存数据')
+        self.save_all_btn.clicked.connect(self.on_save_all_data)
+        save_row.addWidget(self.save_all_btn)
+
+        self.save_status_label = QLabel('未保存')
+        self.save_status_label.setStyleSheet('color:#aaa;')
+        save_row.addWidget(self.save_status_label)
+        root.addLayout(save_row)
+
         # 分隔线
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
@@ -858,6 +922,75 @@ class MainWindow(QMainWindow):
         body.addWidget(self.plot_tabs, 1)
 
         root.addLayout(body, 1)
+
+    def on_choose_save_root(self):
+        current = self.save_root_input.text().strip()
+        if not current:
+            current = os.path.expanduser('~')
+        path = QFileDialog.getExistingDirectory(
+            self, '选择默认保存目录', current)
+        if not path:
+            return
+        self.save_root_input.setText(path)
+        self.settings.setValue('save/root', path)
+
+    def _safe_save_tag(self):
+        tag = self.save_tag_input.text().strip() or 'scan'
+        tag = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', tag)
+        tag = re.sub(r'\s+', '_', tag).strip(' ._')
+        return tag or 'scan'
+
+    def _make_save_dir_and_base(self):
+        root = self.save_root_input.text().strip()
+        if not root:
+            root = os.path.join(
+                os.path.expanduser('~'), 'Documents', 'multi_stage_gui_data')
+            self.save_root_input.setText(root)
+        now = datetime.now()
+        date_day = now.strftime('%Y%m%d')
+        save_dir = os.path.join(
+            root, now.strftime('%Y'), now.strftime('%Y%m'), date_day)
+        os.makedirs(save_dir, exist_ok=True)
+        tag = self._safe_save_tag()
+        self.save_tag_input.setText(tag)
+        self.settings.setValue('save/root', root)
+        self.settings.setValue('save/tag', tag)
+        return save_dir, f'{date_day}-{tag}'
+
+    def on_save_all_data(self):
+        try:
+            save_dir, base_name = self._make_save_dir_and_base()
+            saved = []
+
+            if self.plot_live.has_data():
+                path = os.path.join(save_dir, f'{base_name}_live.csv')
+                self.plot_live.export_csv(path)
+                saved.append(path)
+
+            if self.plot_1d.has_data():
+                path = os.path.join(save_dir, f'{base_name}_1d.csv')
+                self.plot_1d.export_csv(path)
+                saved.append(path)
+
+            if self.plot_2d.has_data():
+                data_path = os.path.join(save_dir, f'{base_name}_2d.csv')
+                self.plot_2d.export_data_to_path(data_path)
+                saved.append(data_path)
+                image_path = os.path.join(save_dir, f'{base_name}_2d.png')
+                self.plot_2d.export_image_to_path(image_path)
+                saved.append(image_path)
+
+            if not saved:
+                self.save_status_label.setText('没有可保存的数据')
+                self.save_status_label.setStyleSheet('color:#ffaa66;')
+                return
+
+            self.save_status_label.setText(
+                f'已保存 {len(saved)} 个文件到 {save_dir}')
+            self.save_status_label.setStyleSheet('color:#66dd66;')
+        except Exception as exc:
+            self.save_status_label.setText(f'保存失败: {exc}')
+            self.save_status_label.setStyleSheet('color:#ff6666;')
 
     def setup_timers(self):
         self.update_timer = QTimer()
